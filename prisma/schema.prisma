@@ -4,6 +4,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -19,6 +20,7 @@ model User {
   refreshTokens   RefreshToken[]
   sessions        Session[]
   sentInvites     Invite[]  @relation("invitedBy")
+  passwordResets  PasswordResetToken[]
 }
 
 model Ministry {
@@ -81,4 +83,15 @@ model Invite {
 
   ministry Ministry @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   invitedBy User @relation("invitedBy", fields: [invitedById], references: [id])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

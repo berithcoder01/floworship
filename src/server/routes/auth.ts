@@ -6,11 +6,13 @@ import {
   createTokens,
   refreshTokens,
   revokeRefreshToken,
+  revokeAllUserTokens,
   createSession,
   revokeSession,
   getUserSessions,
   generateToken,
 } from '../services/auth';
+import { createRateLimitMiddleware, resetRateLimit } from '../middleware/rateLimit';
 
 interface LoginBody {
   email: string;
@@ -50,8 +52,10 @@ function setCookies(reply: any, accessToken: string, refreshToken: string) {
 }
 
 export async function authRoutes(fastify: FastifyInstance) {
+  const rateLimit = createRateLimitMiddleware();
+
   // Login
-  fastify.post<{ Body: LoginBody }>('/auth/login', async (request: any, reply: any) => {
+  fastify.post<{ Body: LoginBody }>('/auth/login', { preHandler: rateLimit }, async (request: any, reply: any) => {
     const { email, password } = request.body;
 
     if (!email || !password) {
@@ -70,13 +74,21 @@ export async function authRoutes(fastify: FastifyInstance) {
       return reply.status(401).send({ error: 'Invalid credentials' });
     }
 
+    resetRateLimit(`${request.ip}:${email}`);
+
     const tokens = await createTokens(user.id);
     await createSession(user.id, request.headers['user-agent'], request.ip);
+
+    const membership = await prisma.ministryMember.findFirst({
+      where: { userId: user.id },
+    });
 
     const accessToken = Buffer.from(JSON.stringify({
       userId: user.id,
       email: user.email,
       name: user.name,
+      ministryId: membership?.ministryId,
+      role: membership?.role,
       exp: tokens.accessTokenExpiresAt.getTime(),
     })).toString('base64');
 
@@ -134,6 +146,8 @@ export async function authRoutes(fastify: FastifyInstance) {
       userId: user.id,
       email: user.email,
       name: user.name,
+      ministryId: ministry.id,
+      role: 'admin',
       exp: tokens.accessTokenExpiresAt.getTime(),
     })).toString('base64');
 
@@ -159,7 +173,15 @@ export async function authRoutes(fastify: FastifyInstance) {
       return reply.status(401).send({ error: 'Invalid or expired refresh token' });
     }
 
+    const user = await prisma.user.findUnique({ where: { id: tokens.userId } });
+    const membership = user ? await prisma.ministryMember.findFirst({ where: { userId: user.id } }) : null;
+
     const accessToken = Buffer.from(JSON.stringify({
+      userId: tokens.userId,
+      email: user?.email,
+      name: user?.name,
+      ministryId: membership?.ministryId,
+      role: membership?.role,
       exp: tokens.accessTokenExpiresAt.getTime(),
     })).toString('base64');
 
@@ -251,6 +273,84 @@ export async function authRoutes(fastify: FastifyInstance) {
       })),
     };
   });
+
+  // Password reset request
+  fastify.post<{ Body: { email: string } }>(
+    '/auth/password-reset/request',
+    { preHandler: rateLimit },
+    async (request: any, reply: any) => {
+      const { email } = request.body;
+
+      if (!email) {
+        return reply.status(400).send({ error: 'Email is required' });
+      }
+
+      const user = await prisma.user.findUnique({ where: { email } });
+
+      if (user) {
+        const token = generateToken();
+        const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+        await prisma.passwordResetToken.create({
+          data: {
+            token,
+            userId: user.id,
+            expiresAt,
+          },
+        });
+
+        console.log(`[PASSWORD RESET] Token for ${email}: ${token}`);
+      }
+
+      return { message: 'If an account exists, a reset link was sent.' };
+    }
+  );
+
+  // Password reset confirm
+  fastify.post<{ Body: { token: string; newPassword: string } }>(
+    '/auth/password-reset/confirm',
+    async (request: any, reply: any) => {
+      const { token, newPassword } = request.body;
+
+      if (!token || !newPassword) {
+        return reply.status(400).send({ error: 'Token and new password are required' });
+      }
+
+      if (newPassword.length < 6) {
+        return reply.status(400).send({ error: 'Password must be at least 6 characters' });
+      }
+
+      const resetToken = await prisma.passwordResetToken.findUnique({ where: { token } });
+
+      if (!resetToken) {
+        return reply.status(400).send({ error: 'Invalid token' });
+      }
+
+      if (resetToken.usedAt) {
+        return reply.status(400).send({ error: 'Token already used' });
+      }
+
+      if (resetToken.expiresAt < new Date()) {
+        return reply.status(400).send({ error: 'Token expired' });
+      }
+
+      const passwordHash = await hashPassword(newPassword);
+
+      await prisma.user.update({
+        where: { id: resetToken.userId },
+        data: { passwordHash },
+      });
+
+      await prisma.passwordResetToken.update({
+        where: { id: resetToken.id },
+        data: { usedAt: new Date() },
+      });
+
+      await revokeAllUserTokens(resetToken.userId);
+
+      return { message: 'Password updated successfully' };
+    }
+  );
 
   // Create invite (admin/operator only)
   fastify.post<{
@@ -357,10 +457,6 @@ export async function authRoutes(fastify: FastifyInstance) {
 
     if (invite.expiresAt < new Date()) {
       return reply.status(400).send({ error: 'Invite expired' });
-    }
-
-    if (invite.email !== request.body.email && !request.body.email) {
-      return reply.status(400).send({ error: 'Email mismatch' });
     }
 
     const passwordHash = await hashPassword(password);

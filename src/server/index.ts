@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
 import { authRoutes } from './routes/auth';
 import { prisma } from './db';
 
@@ -8,6 +9,10 @@ const PORT = Number(process.env.PORT) || 3001;
 async function build() {
   const fastify = Fastify({
     logger: true,
+  });
+
+  await fastify.register(cookie, {
+    secret: process.env.COOKIE_SECRET || 'supersecret',
   });
 
   await fastify.register(cors, {
