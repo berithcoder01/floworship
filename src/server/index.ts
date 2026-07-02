@@ -6,6 +6,7 @@ import { songsRoutes } from './routes/songs';
 import { ministriesRoutes, schedulesRoutes } from './routes/ministries';
 import { repertoireRoutes } from './routes/repertoire';
 import { scheduleRoutes } from './routes/schedules';
+import { whatsappWebhookRoutes } from './routes/whatsappWebhook';
 import { prisma } from './db';
 
 const PORT = Number(process.env.PORT) || 3001;
@@ -30,6 +31,7 @@ async function build() {
   await fastify.register(schedulesRoutes, { prefix: '/api' });
   await fastify.register(repertoireRoutes, { prefix: '/api' });
   await fastify.register(scheduleRoutes, { prefix: '/api' });
+  await fastify.register(whatsappWebhookRoutes, { prefix: '/api' });
 
   return fastify;
 }

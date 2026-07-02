@@ -210,6 +210,8 @@ model Musician {
   instrument  String
   ministryId  String
   worshipRoles String  @default("[]")
+  whatsappPhone String?
+  whatsappOptIn Boolean @default(false)
   createdAt   DateTime @default(now())
 
   user     User     @relation(fields: [userId], references: [id])
@@ -217,14 +219,19 @@ model Musician {
 }
 
 model WhatsAppMessageLog {
-  id          String   @id @default(cuid())
-  ministryId  String
-  message     String
-  sentById    String
-  sentAt      DateTime @default(now())
+  id              String   @id @default(cuid())
+  ministryId      String
+  musicianId      String?
+  templateName    String
+  context         String   @default("{}")
+  messageId       String?
+  status          String   @default("enviado")
+  responsePayload String?
+  sentAt          DateTime @default(now())
 
   ministry Ministry @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   sentBy   User     @relation(fields: [sentById], references: [id])
+  sentById String
 }
 
 model MonthlyScheduleCycle {
