@@ -36,6 +36,8 @@ export function useSessionSocket(sessionId: string, ministryId: string): Session
     wsRef.current = ws;
 
     ws.onopen = () => {
+      backoffRef.current = 1000;
+      setState((prev) => ({ ...prev, isConnected: true }));
       ws.send(JSON.stringify({ type: 'join', sessionId, ministryId }));
     };
 
@@ -64,12 +66,6 @@ export function useSessionSocket(sessionId: string, ministryId: string): Session
         backoffRef.current = Math.min(backoffRef.current * 2, 30000);
         connect();
       }, backoffRef.current);
-    };
-
-    ws.onopen = () => {
-      backoffRef.current = 1000;
-      setState((prev) => ({ ...prev, isConnected: true }));
-      ws.send(JSON.stringify({ type: 'join', sessionId, ministryId }));
     };
   }, [sessionId, ministryId]);
 

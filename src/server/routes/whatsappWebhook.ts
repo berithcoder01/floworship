@@ -6,7 +6,10 @@ const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'floworship-verify';
 const APP_SECRET = process.env.WHATSAPP_APP_SECRET || '';
 
 function verifySignature(body: string, signature: string): boolean {
-  if (!APP_SECRET) return true;
+  if (!APP_SECRET) {
+    console.warn('WHATSAPP_APP_SECRET not set - rejecting webhook');
+    return false;
+  }
   const expected = 'sha256=' + createHmac('sha256', APP_SECRET).update(body).digest('hex');
   return expected === signature;
 }

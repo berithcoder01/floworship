@@ -10,7 +10,7 @@ export async function createCycle(ministryId: string, month: number, year: numbe
       month,
       year,
       status: 'coletando_disponibilidade',
-      availabilityDeadline: new Date(year, month, 15),
+      availabilityDeadline: new Date(year, month - 1, 15),
     },
   });
 }
@@ -69,14 +69,30 @@ async function generateScheduleForCycle(cycleId: string) {
     })
   );
 
-  const assignments = generateSchedule(schedules, roles, [], new Map());
+  const musicians = await prisma.musician.findMany({
+    where: { ministryId: cycle.ministryId },
+  });
+
+  const candidates = musicians.map((m) => ({
+    id: m.id,
+    userId: m.userId,
+    timesServedThisMonth: 0,
+    lastServedAt: {} as Record<string, Date>,
+    worshipRoles: JSON.parse(m.worshipRoles || '[]'),
+  }));
+
+  const assignments = generateSchedule(schedules, roles, candidates, new Map());
 
   for (const assignment of assignments) {
+    const user = assignment.musicianId
+      ? await prisma.musician.findUnique({ where: { id: assignment.musicianId }, select: { userId: true } })
+      : null;
+
     await prisma.serviceAssignment.create({
       data: {
         scheduleId: assignment.scheduleId,
         role: assignment.role,
-        userId: assignment.musicianId || '',
+        userId: user?.userId || cycle.ministryId,
         musicianId: assignment.musicianId,
         status: assignment.status,
       },

@@ -178,6 +178,9 @@ model ServiceAssignment {
 
   schedule ServiceSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
   user     User            @relation(fields: [userId], references: [id])
+
+  @@index([scheduleId, status])
+  @@index([musicianId, status])
 }
 
 model ServiceRepertoireItem {
@@ -216,6 +219,8 @@ model Musician {
 
   user     User     @relation(fields: [userId], references: [id])
   ministry Ministry @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+
+  @@index([ministryId])
 }
 
 model WhatsAppMessageLog {

@@ -12,6 +12,7 @@ import {
   getUserSessions,
   generateToken,
 } from '../services/auth';
+import { signToken, authMiddleware } from '../middleware/auth';
 import { createRateLimitMiddleware, resetRateLimit } from '../middleware/rateLimit';
 
 interface LoginBody {
@@ -83,14 +84,14 @@ export async function authRoutes(fastify: FastifyInstance) {
       where: { userId: user.id },
     });
 
-    const accessToken = Buffer.from(JSON.stringify({
+    const accessToken = signToken({
       userId: user.id,
       email: user.email,
       name: user.name,
+      role: membership?.role as any || 'musician',
       ministryId: membership?.ministryId,
-      role: membership?.role,
       exp: tokens.accessTokenExpiresAt.getTime(),
-    })).toString('base64');
+    });
 
     setCookies(reply, accessToken, tokens.refreshToken);
 
@@ -142,14 +143,14 @@ export async function authRoutes(fastify: FastifyInstance) {
     const tokens = await createTokens(user.id);
     await createSession(user.id, request.headers['user-agent'], request.ip);
 
-    const accessToken = Buffer.from(JSON.stringify({
+    const accessToken = signToken({
       userId: user.id,
       email: user.email,
       name: user.name,
-      ministryId: ministry.id,
-      role: 'admin',
+      role: 'musician',
+      ministryId: ministry?.id,
       exp: tokens.accessTokenExpiresAt.getTime(),
-    })).toString('base64');
+    });
 
     setCookies(reply, accessToken, tokens.refreshToken);
 
@@ -176,14 +177,14 @@ export async function authRoutes(fastify: FastifyInstance) {
     const user = await prisma.user.findUnique({ where: { id: tokens.userId } });
     const membership = user ? await prisma.ministryMember.findFirst({ where: { userId: user.id } }) : null;
 
-    const accessToken = Buffer.from(JSON.stringify({
+    const accessToken = signToken({
       userId: tokens.userId,
-      email: user?.email,
-      name: user?.name,
+      email: user?.email || '',
+      name: user?.name || '',
+      role: membership?.role as any || 'musician',
       ministryId: membership?.ministryId,
-      role: membership?.role,
       exp: tokens.accessTokenExpiresAt.getTime(),
-    })).toString('base64');
+    });
 
     setCookies(reply, accessToken, tokens.refreshToken);
 
@@ -205,22 +206,11 @@ export async function authRoutes(fastify: FastifyInstance) {
   });
 
   // Get user sessions
-  fastify.get('/auth/sessions', async (request: any, reply: any) => {
-    const accessToken = request.cookies?.access_token;
+  fastify.get('/auth/sessions', { preHandler: [authMiddleware] }, async (request: any) => {
+    const user = request.user;
+    if (!user) return [];
 
-    if (!accessToken) {
-      return reply.status(401).send({ error: 'Not authenticated' });
-    }
-
-    let payload: { userId: string };
-
-    try {
-      payload = JSON.parse(Buffer.from(accessToken, 'base64').toString());
-    } catch {
-      return reply.status(401).send({ error: 'Invalid token' });
-    }
-
-    const sessions = await getUserSessions(payload.userId);
+    const sessions = await getUserSessions(user.id);
 
     return sessions.map((s: any) => ({
       id: s.id,
@@ -232,35 +222,24 @@ export async function authRoutes(fastify: FastifyInstance) {
   });
 
   // Revoke session
-  fastify.delete('/auth/sessions/:sessionId', async (request: any) => {
+  fastify.delete('/auth/sessions/:sessionId', { preHandler: [authMiddleware] }, async (request: any) => {
     const { sessionId } = request.params;
     await revokeSession(sessionId);
     return { success: true };
   });
 
   // Get current user
-  fastify.get('/auth/me', async (request: any, reply: any) => {
-    const accessToken = request.cookies?.access_token;
-
-    if (!accessToken) {
-      return reply.status(401).send({ error: 'Not authenticated' });
-    }
-
-    let payload: { userId: string; email: string; name: string };
-
-    try {
-      payload = JSON.parse(Buffer.from(accessToken, 'base64').toString());
-    } catch {
-      return reply.status(401).send({ error: 'Invalid token' });
-    }
+  fastify.get('/auth/me', { preHandler: [authMiddleware] }, async (request: any) => {
+    const authUser = request.user;
+    if (!authUser) return null;
 
     const user = await prisma.user.findUnique({
-      where: { id: payload.userId },
+      where: { id: authUser.id },
       include: { ministryMembers: true },
     });
 
     if (!user) {
-      return reply.status(401).send({ error: 'User not found' });
+      return null;
     }
 
     return {
@@ -299,7 +278,6 @@ export async function authRoutes(fastify: FastifyInstance) {
           },
         });
 
-        console.log(`[PASSWORD RESET] Token for ${email}: ${token}`);
       }
 
       return { message: 'If an account exists, a reset link was sent.' };
@@ -355,24 +333,19 @@ export async function authRoutes(fastify: FastifyInstance) {
   // Create invite (admin/operator only)
   fastify.post<{
     Body: { email: string; role?: string; ministryId?: string };
-  }>('/auth/invite', async (request: any, reply: any) => {
+  }>('/auth/invite', { preHandler: [authMiddleware] }, async (request: any) => {
     const { email, role = 'musician', ministryId } = request.body;
-    const accessToken = request.cookies?.access_token;
+    const authUser = request.user;
 
-    if (!accessToken) {
-      return reply.status(401).send({ error: 'Not authenticated' });
+    if (!authUser) return null;
+
+    if (!['admin', 'operator', 'leader'].includes(authUser.role)) {
+      return { error: 'Forbidden' };
     }
 
-    let payload: { userId: string; ministryId?: string };
-    try {
-      payload = JSON.parse(Buffer.from(accessToken, 'base64').toString());
-    } catch {
-      return reply.status(401).send({ error: 'Invalid token' });
-    }
-
-    const effectiveMinistryId = ministryId || payload.ministryId;
+    const effectiveMinistryId = ministryId || authUser.ministryId;
     if (!effectiveMinistryId) {
-      return reply.status(400).send({ error: 'Ministry ID required' });
+      return { error: 'Ministry ID required' };
     }
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -381,7 +354,7 @@ export async function authRoutes(fastify: FastifyInstance) {
         where: { userId_ministryId: { userId: existingUser.id, ministryId: effectiveMinistryId } },
       });
       if (existingMembership) {
-        return reply.status(400).send({ error: 'User is already a member' });
+        return { error: 'User is already a member' };
       }
     }
 
@@ -395,7 +368,7 @@ export async function authRoutes(fastify: FastifyInstance) {
         role,
         ministryId: effectiveMinistryId,
         expiresAt,
-        invitedById: payload.userId,
+        invitedById: authUser.id,
       },
     });
 
@@ -403,36 +376,16 @@ export async function authRoutes(fastify: FastifyInstance) {
   });
 
   // List invites for ministry (admin/operator only)
-  fastify.get('/auth/invites', async (request: any, reply: any) => {
-    const accessToken = request.cookies?.access_token;
-
-    if (!accessToken) {
-      return reply.status(401).send({ error: 'Not authenticated' });
-    }
-
-    let payload: { userId: string; ministryId?: string };
-    try {
-      payload = JSON.parse(Buffer.from(accessToken, 'base64').toString());
-    } catch {
-      return reply.status(401).send({ error: 'Invalid token' });
-    }
-
-    if (!payload.ministryId) {
-      return reply.status(400).send({ error: 'No ministry selected' });
-    }
+  fastify.get('/auth/invites', { preHandler: [authMiddleware] }, async (request: any) => {
+    const authUser = request.user;
+    if (!authUser?.ministryId) return [];
 
     const invites = await prisma.invite.findMany({
-      where: { ministryId: payload.ministryId, usedAt: null },
+      where: { ministryId: authUser.ministryId },
       orderBy: { createdAt: 'desc' },
     });
 
-    return invites.map((inv: any) => ({
-      id: inv.id,
-      email: inv.email,
-      role: inv.role,
-      expiresAt: inv.expiresAt,
-      createdAt: inv.createdAt,
-    }));
+    return invites;
   });
 
   // Accept invite
@@ -489,12 +442,13 @@ export async function authRoutes(fastify: FastifyInstance) {
     const tokens = await createTokens(user.id);
     await createSession(user.id, request.headers['user-agent'], request.ip);
 
-    const accessToken = Buffer.from(JSON.stringify({
+    const accessToken = signToken({
       userId: user.id,
       email: user.email,
       name: user.name,
+      role: 'musician',
       exp: tokens.accessTokenExpiresAt.getTime(),
-    })).toString('base64');
+    });
 
     setCookies(reply, accessToken, tokens.refreshToken);
 

@@ -1,6 +1,9 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
+import { createHmac } from 'crypto';
 import { prisma } from '../db';
 import { Role } from './rbac';
+
+const TOKEN_SECRET = process.env.TOKEN_SECRET || 'dev-token-secret-change-in-production';
 
 export interface TokenPayload {
   userId: string;
@@ -23,9 +26,22 @@ export interface AuthRequest extends FastifyRequest {
   user?: AuthenticatedUser;
 }
 
+export function signToken(payload: TokenPayload): string {
+  const json = JSON.stringify(payload);
+  const data = Buffer.from(json).toString('base64');
+  const signature = createHmac('sha256', TOKEN_SECRET).update(data).digest('hex');
+  return `${data}.${signature}`;
+}
+
 function decodeToken(token: string): TokenPayload | null {
   try {
-    const json = Buffer.from(token, 'base64').toString('utf8');
+    const [data, signature] = token.split('.');
+    if (!data || !signature) return null;
+
+    const expected = createHmac('sha256', TOKEN_SECRET).update(data).digest('hex');
+    if (expected !== signature) return null;
+
+    const json = Buffer.from(data, 'base64').toString('utf8');
     const payload = JSON.parse(json) as TokenPayload;
 
     if (payload.exp < Date.now()) {

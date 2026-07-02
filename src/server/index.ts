@@ -17,7 +17,7 @@ async function build() {
   });
 
   await fastify.register(cookie, {
-    secret: process.env.COOKIE_SECRET || 'supersecret',
+    secret: process.env.COOKIE_SECRET || (process.env.NODE_ENV === 'production' ? (() => { throw new Error('COOKIE_SECRET required in production') })() : 'dev-secret'),
   });
 
   await fastify.register(cors, {
