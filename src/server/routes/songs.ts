@@ -1,37 +1,24 @@
 import { FastifyInstance } from 'fastify';
 import { prisma } from '../db';
+import { authMiddleware } from '../middleware/auth';
+import type { AuthenticatedUser } from '../middleware/auth';
 
-function getMinistryId(request: any): string | null {
-  const token = request.cookies?.access_token;
-  if (!token) return null;
-  try {
-    const payload = JSON.parse(Buffer.from(token, 'base64').toString());
-    return payload.ministryId || null;
-  } catch {
-    return null;
-  }
-}
-
-function getUserPayload(request: any): { userId: string; ministryId?: string; role?: string } | null {
-  const token = request.cookies?.access_token;
-  if (!token) return null;
-  try {
-    return JSON.parse(Buffer.from(token, 'base64').toString());
-  } catch {
-    return null;
-  }
+function getUser(request: { user?: unknown }): AuthenticatedUser | null {
+  return (request.user as AuthenticatedUser) || null;
 }
 
 export async function songsRoutes(fastify: FastifyInstance) {
+  fastify.addHook('preHandler', authMiddleware);
+
   // List songs
   fastify.get('/songs', async (request: any, reply: any) => {
-    const ministryId = getMinistryId(request);
-    if (!ministryId) {
-      return reply.status(401).send({ error: 'Not authenticated' });
+    const user = getUser(request);
+    if (!user?.ministryId) {
+      return reply.status(400).send({ error: 'Ministry required' });
     }
 
     const songs = await prisma.song.findMany({
-      where: { ministryId },
+      where: { ministryId: user.ministryId },
       include: { cueSheet: true },
       orderBy: { title: 'asc' },
     });
@@ -41,13 +28,13 @@ export async function songsRoutes(fastify: FastifyInstance) {
 
   // Get song by id
   fastify.get<{ Params: { id: string } }>('/songs/:id', async (request: any, reply: any) => {
-    const ministryId = getMinistryId(request);
-    if (!ministryId) {
-      return reply.status(401).send({ error: 'Not authenticated' });
+    const user = getUser(request);
+    if (!user?.ministryId) {
+      return reply.status(400).send({ error: 'Ministry required' });
     }
 
     const song = await prisma.song.findFirst({
-      where: { id: request.params.id, ministryId },
+      where: { id: request.params.id, ministryId: user.ministryId },
       include: {
         cueSheet: {
           include: { blocks: { orderBy: { order: 'asc' } } },
@@ -64,16 +51,16 @@ export async function songsRoutes(fastify: FastifyInstance) {
 
   // Create song
   fastify.post('/songs', async (request: any, reply: any) => {
-    const user = getUserPayload(request);
+    const user = getUser(request);
     if (!user?.ministryId) {
-      return reply.status(401).send({ error: 'Not authenticated' });
+      return reply.status(400).send({ error: 'Ministry required' });
     }
 
     if (user.role === 'musician') {
       return reply.status(403).send({ error: 'Forbidden' });
     }
 
-    const { title, artist, defaultKey, tags, notes } = request.body as any;
+    const { title, artist, defaultKey, tags, notes } = request.body as Record<string, unknown>;
 
     if (!title) {
       return reply.status(400).send({ error: 'Title is required' });
@@ -81,13 +68,13 @@ export async function songsRoutes(fastify: FastifyInstance) {
 
     const song = await prisma.song.create({
       data: {
-        title,
-        artist,
-        defaultKey,
-        tags: JSON.stringify(tags || []),
-        notes,
+        title: title as string,
+        artist: artist as string,
+        defaultKey: defaultKey as string,
+        tags: JSON.stringify((tags as string[]) || []),
+        notes: notes as string,
         ministryId: user.ministryId,
-        createdById: user.userId,
+        createdById: user.id,
       },
     });
 
@@ -96,9 +83,9 @@ export async function songsRoutes(fastify: FastifyInstance) {
 
   // Update song
   fastify.put<{ Params: { id: string } }>('/songs/:id', async (request: any, reply: any) => {
-    const user = getUserPayload(request);
+    const user = getUser(request);
     if (!user?.ministryId) {
-      return reply.status(401).send({ error: 'Not authenticated' });
+      return reply.status(400).send({ error: 'Ministry required' });
     }
 
     if (user.role === 'musician') {
@@ -113,17 +100,17 @@ export async function songsRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'Song not found' });
     }
 
-    const { title, artist, defaultKey, tags, notes, status } = request.body as any;
+    const { title, artist, defaultKey, tags, notes, status } = request.body as Record<string, unknown>;
 
     const updated = await prisma.song.update({
       where: { id: request.params.id },
       data: {
-        ...(title !== undefined && { title }),
-        ...(artist !== undefined && { artist }),
-        ...(defaultKey !== undefined && { defaultKey }),
+        ...(title !== undefined && { title: title as string }),
+        ...(artist !== undefined && { artist: artist as string }),
+        ...(defaultKey !== undefined && { defaultKey: defaultKey as string }),
         ...(tags !== undefined && { tags: JSON.stringify(tags) }),
-        ...(notes !== undefined && { notes }),
-        ...(status !== undefined && { status }),
+        ...(notes !== undefined && { notes: notes as string }),
+        ...(status !== undefined && { status: status as string }),
       },
     });
 
@@ -132,9 +119,9 @@ export async function songsRoutes(fastify: FastifyInstance) {
 
   // Delete song (soft delete - set status to arquivada)
   fastify.delete<{ Params: { id: string } }>('/songs/:id', async (request: any, reply: any) => {
-    const user = getUserPayload(request);
+    const user = getUser(request);
     if (!user?.ministryId) {
-      return reply.status(401).send({ error: 'Not authenticated' });
+      return reply.status(400).send({ error: 'Ministry required' });
     }
 
     if (user.role === 'musician') {
@@ -159,9 +146,9 @@ export async function songsRoutes(fastify: FastifyInstance) {
 
   // Upsert cue sheet with blocks
   fastify.post<{ Params: { id: string } }>('/songs/:id/cue-sheet', async (request: any, reply: any) => {
-    const user = getUserPayload(request);
+    const user = getUser(request);
     if (!user?.ministryId) {
-      return reply.status(401).send({ error: 'Not authenticated' });
+      return reply.status(400).send({ error: 'Ministry required' });
     }
 
     if (user.role === 'musician') {
@@ -176,37 +163,37 @@ export async function songsRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'Song not found' });
     }
 
-    const { referenceTrackUrl, totalDurationSeconds, blocks } = request.body as any;
+    const { referenceTrackUrl, totalDurationSeconds, blocks } = request.body as Record<string, unknown>;
 
     const cueSheet = await prisma.songCueSheet.upsert({
       where: { songId: request.params.id },
       create: {
         songId: request.params.id,
-        referenceTrackUrl,
-        totalDurationSeconds,
+        referenceTrackUrl: referenceTrackUrl as string,
+        totalDurationSeconds: totalDurationSeconds as number,
         blocks: blocks ? {
-          create: blocks.map((b: any, i: number) => ({
-            label: b.label,
-            startTime: b.startTime,
-            endTime: b.endTime,
-            duration: b.duration,
-            chordproContent: b.chordproContent,
-            order: b.order ?? i,
+          create: (blocks as Record<string, unknown>[]).map((b, i) => ({
+            label: b.label as string,
+            startTime: b.startTime as number,
+            endTime: b.endTime as number,
+            duration: b.duration as number,
+            chordproContent: b.chordproContent as string,
+            order: (b.order as number) ?? i,
           })),
         } : undefined,
       },
       update: {
-        referenceTrackUrl,
-        totalDurationSeconds,
+        referenceTrackUrl: referenceTrackUrl as string,
+        totalDurationSeconds: totalDurationSeconds as number,
         blocks: blocks ? {
           deleteMany: {},
-          create: blocks.map((b: any, i: number) => ({
-            label: b.label,
-            startTime: b.startTime,
-            endTime: b.endTime,
-            duration: b.duration,
-            chordproContent: b.chordproContent,
-            order: b.order ?? i,
+          create: (blocks as Record<string, unknown>[]).map((b, i) => ({
+            label: b.label as string,
+            startTime: b.startTime as number,
+            endTime: b.endTime as number,
+            duration: b.duration as number,
+            chordproContent: b.chordproContent as string,
+            order: (b.order as number) ?? i,
           })),
         } : undefined,
       },
@@ -218,13 +205,13 @@ export async function songsRoutes(fastify: FastifyInstance) {
 
   // Get cue sheet
   fastify.get<{ Params: { id: string } }>('/songs/:id/cue-sheet', async (request: any, reply: any) => {
-    const ministryId = getMinistryId(request);
-    if (!ministryId) {
-      return reply.status(401).send({ error: 'Not authenticated' });
+    const user = getUser(request);
+    if (!user?.ministryId) {
+      return reply.status(400).send({ error: 'Ministry required' });
     }
 
     const song = await prisma.song.findFirst({
-      where: { id: request.params.id, ministryId },
+      where: { id: request.params.id, ministryId: user.ministryId },
     });
 
     if (!song) {

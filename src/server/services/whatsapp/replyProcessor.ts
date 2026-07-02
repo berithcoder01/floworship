@@ -15,13 +15,18 @@ export async function processButtonReply(
   if (buttonId === 'disponivel' || buttonId === 'nao_disponivel') {
     const available = buttonId === 'disponivel';
     const cycleId = context.messageId;
-    await prisma.$executeRawUnsafe(
-      `INSERT OR REPLACE INTO availability_response (cycle_id, musician_id, sunday_date, available, responded_at)
-       VALUES (?, ?, datetime('now'), ?, datetime('now'))`,
-      cycleId,
-      musician.id,
-      available ? 1 : 0
-    );
+
+    try {
+      await prisma.$executeRawUnsafe(
+        `INSERT OR REPLACE INTO availability_response (cycle_id, musician_id, sunday_date, available, responded_at)
+         VALUES (?, ?, datetime('now'), ?, datetime('now'))`,
+        cycleId,
+        musician.id,
+        available ? 1 : 0
+      );
+    } catch (e) {
+      console.error('Failed to save availability response:', e);
+    }
   }
 
   if (buttonId === 'aceito' || buttonId === 'nao_posso') {

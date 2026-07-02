@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { AuthProvider } from './context/AuthProvider';
+import { useAuth } from './context/AuthContext';
 import { LoginPage } from './pages/auth/LoginPage';
 import { MinistrySelector } from './pages/dashboard/MinistrySelector';
 import { Dashboard } from './pages/dashboard/Dashboard';
@@ -15,171 +16,156 @@ import { StudyMode } from './pages/study/StudyMode';
 import { ScheduleDashboard } from './pages/admin/ScheduleDashboard';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [hasMinistry, setHasMinistry] = useState<boolean | null>(null);
+  const { user, loading } = useAuth();
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/auth/me`, {
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setHasMinistry(data.ministries?.length > 0);
-        setIsAuthenticated(true);
-      } else {
-        setIsAuthenticated(false);
-      }
-    } catch {
-      setIsAuthenticated(false);
-    }
-  };
-
-  if (isAuthenticated === null) {
+  if (loading) {
     return <div className="loading-screen">Loading...</div>;
   }
 
-  if (!isAuthenticated) {
+  if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  if (!hasMinistry) {
+  if (!user.ministries?.length) {
     return <Navigate to="/select-ministry" replace />;
   }
 
   return <>{children}</>;
 }
 
-function AuthenticatedLayout() {
-  const [userName, setUserName] = useState('');
+function ModoOperadorRoute() {
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const { user } = useAuth();
+  return <ModoOperador sessionId={sessionId || ''} ministryId={user?.ministries?.[0]?.ministryId || ''} />;
+}
 
-  useEffect(() => {
-    fetchUser();
-  }, []);
+function ModoLetraRoute() {
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const { user } = useAuth();
+  return <ModoLetra sessionId={sessionId || ''} ministryId={user?.ministries?.[0]?.ministryId || ''} />;
+}
 
-  const fetchUser = async () => {
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/auth/me`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUserName(data.name || '');
-      }
-    } catch {
-      // ignore
-    }
-  };
+function ModoCifraRoute() {
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const { user } = useAuth();
+  return <ModoCifra sessionId={sessionId || ''} ministryId={user?.ministries?.[0]?.ministryId || ''} />;
+}
 
-  return <Dashboard userName={userName} />;
+function ModoTVRoute() {
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const { user } = useAuth();
+  return <ModoTV sessionId={sessionId || ''} ministryId={user?.ministries?.[0]?.ministryId || ''} />;
+}
+
+function AppRoutes() {
+  const { user } = useAuth();
+
+  return (
+    <Routes>
+      <Route
+        path="/login"
+        element={<LoginPage onLoginSuccess={() => window.location.href = '/dashboard'} />}
+      />
+      <Route
+        path="/select-ministry"
+        element={
+          <ProtectedRoute>
+            <MinistrySelector onSelect={() => window.location.href = '/dashboard'} />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <Dashboard userName={user?.name || ''} />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/library"
+        element={
+          <ProtectedRoute>
+            <SongList />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/library/new"
+        element={
+          <ProtectedRoute>
+            <NewSong />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/library/:id"
+        element={
+          <ProtectedRoute>
+            <SongDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      <Route
+        path="/session/:sessionId/operador"
+        element={
+          <ProtectedRoute>
+            <ModoOperadorRoute />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/session/:sessionId/letra"
+        element={
+          <ProtectedRoute>
+            <ModoLetraRoute />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/session/:sessionId/cifra"
+        element={
+          <ProtectedRoute>
+            <ModoCifraRoute />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/session/:sessionId/tv"
+        element={
+          <ProtectedRoute>
+            <ModoTVRoute />
+          </ProtectedRoute>
+        }
+      />
+      <Route path="/session/end" element={<SessionEnd />} />
+      <Route
+        path="/library/:songId/study"
+        element={
+          <ProtectedRoute>
+            <StudyMode />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/schedules"
+        element={
+          <ProtectedRoute>
+            <ScheduleDashboard />
+          </ProtectedRoute>
+        }
+      />
+    </Routes>
+  );
 }
 
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route
-          path="/login"
-          element={
-            <LoginPage onLoginSuccess={() => window.location.href = '/dashboard'} />
-          }
-        />
-        <Route
-          path="/select-ministry"
-          element={
-            <ProtectedRoute>
-              <MinistrySelector onSelect={() => window.location.href = '/dashboard'} />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <AuthenticatedLayout />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/library"
-          element={
-            <ProtectedRoute>
-              <SongList />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/library/new"
-          element={
-            <ProtectedRoute>
-              <NewSong />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/library/:id"
-          element={
-            <ProtectedRoute>
-              <SongDetail />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route
-          path="/session/:sessionId/operador"
-          element={
-            <ProtectedRoute>
-              <ModoOperador sessionId={window.location.pathname.split('/')[2]} ministryId="current" />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/session/:sessionId/letra"
-          element={
-            <ProtectedRoute>
-              <ModoLetra sessionId={window.location.pathname.split('/')[2]} ministryId="current" />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/session/:sessionId/cifra"
-          element={
-            <ProtectedRoute>
-              <ModoCifra sessionId={window.location.pathname.split('/')[2]} ministryId="current" />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/session/:sessionId/tv"
-          element={
-            <ProtectedRoute>
-              <ModoTV sessionId={window.location.pathname.split('/')[2]} ministryId="current" />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="/session/end" element={<SessionEnd />} />
-        <Route
-          path="/library/:songId/study"
-          element={
-            <ProtectedRoute>
-              <StudyMode />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/schedules"
-          element={
-            <ProtectedRoute>
-              <ScheduleDashboard />
-            </ProtectedRoute>
-          }
-        />
-      </Routes>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
     </BrowserRouter>
   );
 }

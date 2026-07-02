@@ -12,8 +12,9 @@ interface ModoOperadorProps {
 export function ModoOperador({ sessionId, ministryId, onTriggerOverride, onEndSession }: ModoOperadorProps) {
   const { currentBlock, blocks, isOverrideActive, isConnected } = useSessionSocket(sessionId, ministryId);
 
-  const progress = currentBlock
-    ? Math.min(((currentBlock.duration || 0) / (currentBlock.duration || 1)) * 100, 100)
+  const currentIndex = blocks.findIndex((b) => b.id === currentBlock?.id);
+  const progress = blocks.length > 0
+    ? Math.min(((currentIndex + 1) / blocks.length) * 100, 100)
     : 0;
 
   return (

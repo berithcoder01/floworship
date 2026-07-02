@@ -71,13 +71,32 @@ async function generateScheduleForCycle(cycleId: string) {
 
   const musicians = await prisma.musician.findMany({
     where: { ministryId: cycle.ministryId },
+    include: {
+      assignments: {
+        where: { status: 'confirmado' },
+        orderBy: { schedule: { date: 'desc' } },
+        take: 1,
+        select: { role: true, schedule: { select: { date: true } } },
+      },
+    },
   });
+
+  const lastServedMap = new Map<string, Record<string, Date>>();
+  for (const m of musicians) {
+    const map: Record<string, Date> = {};
+    for (const a of m.assignments) {
+      if (!map[a.role]) {
+        map[a.role] = a.schedule.date;
+      }
+    }
+    lastServedMap.set(m.id, map);
+  }
 
   const candidates = musicians.map((m) => ({
     id: m.id,
     userId: m.userId,
-    timesServedThisMonth: 0,
-    lastServedAt: {} as Record<string, Date>,
+    timesServedThisMonth: m.assignments.length,
+    lastServedAt: lastServedMap.get(m.id) || {} as Record<string, Date>,
     worshipRoles: JSON.parse(m.worshipRoles || '[]'),
   }));
 

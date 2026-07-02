@@ -42,6 +42,7 @@ model Ministry {
   musicians Musician[]
   whatsappLogs WhatsAppMessageLog[]
   cycles    MonthlyScheduleCycle[]
+  config    MinistryConfig?
 }
 
 model MinistryMember {
@@ -168,7 +169,7 @@ model ServiceSchedule {
 model ServiceAssignment {
   id          String   @id @default(cuid())
   scheduleId  String
-  userId      String
+  userId      String?
   role        String
   musicianId  String?
   status      String   @default("confirmado")
@@ -177,7 +178,8 @@ model ServiceAssignment {
   confirmedAt DateTime?
 
   schedule ServiceSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-  user     User            @relation(fields: [userId], references: [id])
+  user     User?           @relation(fields: [userId], references: [id])
+  musician Musician?       @relation(fields: [musicianId], references: [id])
 
   @@index([scheduleId, status])
   @@index([musicianId, status])
@@ -217,8 +219,9 @@ model Musician {
   whatsappOptIn Boolean @default(false)
   createdAt   DateTime @default(now())
 
-  user     User     @relation(fields: [userId], references: [id])
-  ministry Ministry @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  user        User                @relation(fields: [userId], references: [id])
+  ministry    Ministry            @relation(fields: [ministryId], references: [id], onDelete: Cascade)
+  assignments ServiceAssignment[]
 
   @@index([ministryId])
 }
@@ -227,6 +230,7 @@ model WhatsAppMessageLog {
   id              String   @id @default(cuid())
   ministryId      String
   musicianId      String?
+  sentById        String
   templateName    String
   context         String   @default("{}")
   messageId       String?
@@ -236,7 +240,6 @@ model WhatsAppMessageLog {
 
   ministry Ministry @relation(fields: [ministryId], references: [id], onDelete: Cascade)
   sentBy   User     @relation(fields: [sentById], references: [id])
-  sentById String
 }
 
 model MonthlyScheduleCycle {
@@ -256,4 +259,6 @@ model MinistryConfig {
   availabilityDeadlineDays Int      @default(5)
   substitutionWindowHours  Int      @default(4)
   cycleTriggerDay          Int      @default(20)
+
+  ministry Ministry @relation(fields: [ministryId], references: [id], onDelete: Cascade)
 }

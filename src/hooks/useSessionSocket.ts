@@ -72,7 +72,7 @@ export function useSessionSocket(sessionId: string, ministryId: string): Session
   useEffect(() => {
     const fetchSnapshot = async () => {
       try {
-        const res = await fetch(`/sessions/${sessionId}/state`);
+        const res = await fetch(`/sessions/${sessionId}/state`, { credentials: 'include' });
         if (res.ok) {
           const snapshot: SessionSnapshot = await res.json();
           const block = snapshot.blocks.find((b) => b.id === snapshot.currentBlockId);
